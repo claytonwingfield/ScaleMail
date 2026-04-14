@@ -1,127 +1,266 @@
 "use client";
 
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function ArmorBackground() {
+  const { tipColor, baseColor, strokeColor } = useTheme();
+
   return (
     <div className="fixed inset-0 -z-10 pointer-events-none">
-      <Canvas camera={{ position: [0, 0, 20], fov: 50 }}>
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[10, 10, 10]} intensity={1} />
-        <AdaptiveScales speed={1} amplitude={0.3} scaleSize={2} />
+      <Canvas camera={{ position: [0, 0, 20], fov: 50 }} dpr={[1, 1.5]}>
+        {/* Diffused top-left light — pronounced gradient */}
+        <ambientLight intensity={0.35} />
+        <directionalLight position={[-10, 8, 12]} intensity={1.0} />
+        {/* Subtle fill from bottom-right */}
+        <directionalLight position={[8, -6, 5]} intensity={0.1} />
+        <ScalesInstanced
+          scaleSize={2}
+          tipColor={tipColor}
+          baseColor={baseColor}
+          strokeColor={strokeColor}
+        />
       </Canvas>
     </div>
   );
 }
 
-function AdaptiveScales({ speed, amplitude, scaleSize }) {
-  // get viewport size inside <Canvas>
-  const { size } = useThree();
-  const w = scaleSize;
-  const h = scaleSize;
-  const cols = Math.ceil(size.width / w) + 2;
-  const rows = Math.ceil(size.height / (h * 0.5)) + 2;
-  return (
-    <ScalesGrid
-      rows={rows}
-      cols={cols}
-      scaleSize={scaleSize}
-      speed={speed}
-      amplitude={amplitude}
-    />
-  );
+// ── Armor scale shape ──────────────────────────────────────────────
+// Broad rounded top (hinge), tapers to a point at the bottom.
+function makeScaleShape(w, h) {
+  const shape = new THREE.Shape();
+  const hw = w / 2;
+
+  shape.moveTo(0, 0);
+  shape.bezierCurveTo(hw * 0.5, 0, hw, -h * 0.05, hw, -h * 0.2);
+  shape.bezierCurveTo(hw, -h * 0.5, hw * 0.3, -h * 0.85, 0, -h);
+  shape.bezierCurveTo(-hw * 0.3, -h * 0.85, -hw, -h * 0.5, -hw, -h * 0.2);
+  shape.bezierCurveTo(-hw, -h * 0.05, -hw * 0.5, 0, 0, 0);
+
+  return shape;
 }
 
-function ScalesGrid({ rows, cols, scaleSize, speed, amplitude }) {
-  // load textures: color, normal, height
-  const [colorMap, normalMap, heightMap] = useTexture([
-    "/textures/color.png",
-    "/textures/normal.png",
-    "/textures/height.png",
-  ]);
+// Helper: parse hex color string to THREE.Color-friendly [r, g, b] in 0–1 range
+function hexToVec3(hex) {
+  const c = new THREE.Color(hex);
+  return [c.r, c.g, c.b];
+}
 
-  [colorMap, normalMap, heightMap].forEach((tex) => {
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  });
+function ScalesInstanced({ scaleSize, tipColor, baseColor, strokeColor }) {
+  const faceRef = useRef();
+  const strokeRef = useRef();
+  const { viewport } = useThree();
 
   const w = scaleSize;
-  const h = scaleSize;
+  const h = scaleSize * 1.4;
+  const cols = Math.ceil(viewport.width / w) + 4;
+  const rows = Math.ceil(viewport.height / (h * 0.45)) + 4;
+  const count = rows * cols;
 
-  // shape + extruded geometry for scallop
-  const geometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    shape.moveTo(-w / 2, h / 2);
-    shape.lineTo(w / 2, h / 2);
-    shape.lineTo(w / 2, 0);
-    shape.absarc(0, 0, w / 2, 0, Math.PI, true);
-    shape.closePath();
-    // extrude with subdivisions for displacement
-    return new THREE.ExtrudeBufferGeometry(shape, {
-      depth: 0.05, // tiny depth so normals/displacement work
-      steps: 20,
-      bevelEnabled: false,
-    });
-  }, [w, h]);
+  // Load the cracked texture
+  const crackedTex = useTexture("/textures/cracked-scale.png");
+  crackedTex.wrapS = crackedTex.wrapT = THREE.RepeatWrapping;
 
-  // material with full PBR + displacement
-  const material = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        map: colorMap,
-        normalMap: normalMap,
-        displacementMap: heightMap,
-        displacementScale: 0.1,
-        metalness: 0.5,
-        roughness: 0.6,
-      }),
-    [colorMap, normalMap, heightMap]
+  // Face geometry
+  const faceGeo = useMemo(
+    () => new THREE.ShapeGeometry(makeScaleShape(w, h), 12),
+    [w, h]
   );
 
-  // generate mesh positions in scallop tiling
-  const positions = useMemo(() => {
-    const arr = [];
-    const rowSpacing = h * 0.5;
+  // Stroke geometry — slightly larger
+  const strokeGeo = useMemo(
+    () => new THREE.ShapeGeometry(makeScaleShape(w * 1.05, h * 1.03), 12),
+    [w, h]
+  );
+
+  // Per-instance UV offsets — each scale crops a different part of the texture
+  const cropScale = 0.08; // each scale shows ~8% of the texture (zoomed in)
+  const uvOffsets = useMemo(() => {
+    const offsets = new Float32Array(count * 2);
+    for (let i = 0; i < count; i++) {
+      offsets[i * 2] = Math.random() * (1 - cropScale);
+      offsets[i * 2 + 1] = Math.random() * (1 - cropScale);
+    }
+    return offsets;
+  }, [count]);
+
+  // Attach per-instance UV offset attribute to face geometry
+  useEffect(() => {
+    if (!faceRef.current) return;
+    const attr = new THREE.InstancedBufferAttribute(uvOffsets, 2);
+    faceRef.current.geometry.setAttribute("aUvOffset", attr);
+  }, [faceRef, uvOffsets]);
+
+  // Parse theme colors
+  const tipVec = useMemo(() => hexToVec3(tipColor), [tipColor]);
+  const baseVec = useMemo(() => hexToVec3(baseColor), [baseColor]);
+
+  // Custom material with per-instance UV offset shader injection
+  // Recreate when theme colors change
+  const faceMat = useMemo(() => {
+    const mat = new THREE.MeshStandardMaterial({
+      map: crackedTex,
+      color: new THREE.Color(1, 1, 1), // white base — color comes from shader gradient
+      metalness: 0.3,
+      roughness: 0.7,
+      side: THREE.DoubleSide,
+    });
+
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.cropScale = { value: cropScale };
+      shader.uniforms.uTipColor = { value: new THREE.Vector3(...tipVec) };
+      shader.uniforms.uBaseColor = { value: new THREE.Vector3(...baseVec) };
+
+      // Add instance attribute + local UV varying to vertex shader
+      shader.vertexShader = shader.vertexShader.replace(
+        "void main() {",
+        `attribute vec2 aUvOffset;
+         varying vec2 vCropUv;
+         varying vec2 vLocalUv;
+         uniform float cropScale;
+         void main() {`
+      );
+
+      // Pass both cropped UV and local UV to fragment shader
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <uv_vertex>",
+        `#include <uv_vertex>
+         vCropUv = uv * cropScale + aUvOffset;
+         vLocalUv = uv;`
+      );
+
+      // Declare varyings in fragment shader
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "void main() {",
+        `varying vec2 vCropUv;
+         varying vec2 vLocalUv;
+         uniform vec3 uTipColor;
+         uniform vec3 uBaseColor;
+         void main() {`
+      );
+
+      // Layer: per-scale gradient × cracked texture crop
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <map_fragment>",
+        `#ifdef USE_MAP
+           // Theme gradient: tip → base
+           vec3 scaleColor = mix(uTipColor, uBaseColor, vLocalUv.y);
+           // Central ridge highlight
+           float ridge = 1.0 - 0.15 * pow(abs(vLocalUv.x - 0.5) * 2.0, 1.5);
+           scaleColor *= ridge;
+           // Cracked texture crop
+           vec4 crackedColor = texture2D(map, vCropUv);
+           // Layer: gradient underneath, cracked texture on top
+           diffuseColor.rgb = scaleColor * crackedColor.rgb;
+         #endif`
+      );
+    };
+
+    return mat;
+  }, [crackedTex, tipVec, baseVec]);
+
+  // Update stroke color reactively
+  const strokeMat = useMemo(
+    () => new THREE.MeshBasicMaterial({ color: new THREE.Color(strokeColor), side: THREE.DoubleSide }),
+    [strokeColor]
+  );
+
+  // Grid positions + row indices
+  const { basePositions, rowIndices } = useMemo(() => {
+    const positions = [];
+    const ri = [];
+    const rowSpacing = h * 0.45;
     const colSpacing = w;
     for (let row = 0; row < rows; row++) {
+      const xOff = row % 2 === 0 ? 0 : colSpacing / 2;
       for (let col = 0; col < cols; col++) {
-        const x = (col - (cols - 1) / 2) * colSpacing;
+        const x = (col - (cols - 1) / 2) * colSpacing + xOff;
         const y = ((rows - 1) / 2 - row) * rowSpacing;
-        arr.push([x, y, 0]);
+        positions.push(x, y, 0);
+        ri.push(row);
       }
     }
-    return arr;
+    return { basePositions: positions, rowIndices: ri };
   }, [rows, cols, w, h]);
 
-  // random phase per scale for independent timing
-  const phases = useMemo(
-    () => positions.map(() => Math.random() * Math.PI * 2),
-    [positions]
-  );
+  // Ripple state — wide waves that sweep through, scales pendulum-swing
+  const rippleState = useRef({
+    active: [],
+    nextRippleTime: 1.5 + Math.random() * 2,
+  });
 
-  const groupRef = useRef();
+  const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  // animate each scale's world position up/down
   useFrame(({ clock }) => {
-    const t = clock.getElapsedTime() * speed;
-    groupRef.current.children.forEach((mesh, idx) => {
-      mesh.position.z = Math.sin(t + phases[idx]) * amplitude;
-    });
+    if (!faceRef.current) return;
+    const t = clock.getElapsedTime();
+    const rs = rippleState.current;
+
+    // Spawn ripple waves occasionally
+    if (t > rs.nextRippleTime) {
+      rs.active.push({
+        originY: (Math.random() - 0.5) * viewport.height,
+        direction: Math.random() > 0.5 ? 1 : -1,
+        startTime: t,
+        speed: 5 + Math.random() * 3,
+        strength: 0.06 + Math.random() * 0.06,
+      });
+      rs.nextRippleTime = t + 2.5 + Math.random() * 4;
+      if (rs.active.length > 3) rs.active.shift();
+    }
+
+    for (let i = 0; i < count; i++) {
+      const bx = basePositions[i * 3];
+      const by = basePositions[i * 3 + 1];
+      const row = rowIndices[i];
+
+      // Sum Z-axis rotation (pendulum swing) from all active ripples
+      let rotZ = 0;
+      for (const rip of rs.active) {
+        const elapsed = t - rip.startTime;
+        const waveFrontY = rip.originY + elapsed * rip.speed * rip.direction;
+        const delta = (by - waveFrontY) * rip.direction;
+
+        // Wide envelope for big sweeping ripple
+        const envelope = Math.exp(-(delta * delta) / 4);
+        const fade = Math.max(0, 1 - elapsed / 5);
+        const distanceFade = Math.max(0, 1 - (elapsed * rip.speed) / (viewport.height * 2));
+        rotZ += Math.sin(delta * 2) * rip.strength * envelope * fade * distanceFade;
+      }
+
+      // Upper rows in front
+      const zLayer = (rows - row) * 0.02;
+
+      // Z rotation = pendulum swing (left/right, stays flat)
+      dummy.position.set(bx, by, zLayer);
+      dummy.rotation.set(0, 0, rotZ);
+      dummy.updateMatrix();
+      faceRef.current.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.z = zLayer - 0.005;
+      dummy.updateMatrix();
+      strokeRef.current.setMatrixAt(i, dummy.matrix);
+    }
+
+    faceRef.current.instanceMatrix.needsUpdate = true;
+    strokeRef.current.instanceMatrix.needsUpdate = true;
   });
 
   return (
-    <group ref={groupRef}>
-      {positions.map((pos, i) => (
-        <mesh
-          key={i}
-          geometry={geometry}
-          material={material}
-          position={pos}
-          rotation={[-Math.PI / 2, 0, 0]}
-        />
-      ))}
-    </group>
+    <>
+      <instancedMesh
+        ref={strokeRef}
+        args={[strokeGeo, strokeMat, count]}
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={faceRef}
+        args={[faceGeo, faceMat, count]}
+        frustumCulled={false}
+      />
+    </>
   );
 }

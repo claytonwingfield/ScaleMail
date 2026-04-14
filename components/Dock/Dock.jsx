@@ -58,7 +58,7 @@ export default function Dock({
     IoIcons[name] ||
     FaIcons.FaQuestion;
 
-  const renderStaticIcon = ({ title, icon, reactIconName, reactIconColor }) => {
+  const renderStaticIcon = ({ title, icon, reactIcon, reactIconColor }) => {
     const STRAPI = process.env.NEXT_PUBLIC_STRAPI_URL ?? "";
     const imgUrl = icon?.[0]?.url;
     if (imgUrl) {
@@ -70,7 +70,7 @@ export default function Dock({
         />
       );
     }
-    const Icon = pickIcon(reactIconName);
+    const Icon = pickIcon(reactIcon);
     return (
       <Icon
         className="w-10 h-10"
@@ -138,6 +138,14 @@ export default function Dock({
                 className={iconCls(idx)}
               >
                 <div className="relative">
+                  {hoveredIndex === idx && (
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none">
+                      <div className="relative bg-gray-800/90 backdrop-blur-sm text-white text-xs font-medium px-3 py-1 rounded-md whitespace-nowrap shadow-lg">
+                        {item.title}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[5px] border-t-gray-800/90" />
+                      </div>
+                    </div>
+                  )}
                   {renderStaticIcon(item)}
                   {(isActive || isMinimized) && ( // ★ NEW
                     <span className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-1 rounded-full bg-white" />
@@ -166,6 +174,14 @@ export default function Dock({
                 className={iconCls(hoverIdx)}
               >
                 <div className="relative">
+                  {hoveredIndex === hoverIdx && (
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none">
+                      <div className="relative bg-gray-800/90 backdrop-blur-sm text-white text-xs font-medium px-3 py-1 rounded-md whitespace-nowrap shadow-lg">
+                        {folder.title}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[5px] border-t-gray-800/90" />
+                      </div>
+                    </div>
+                  )}
                   {renderFolderIcon(folder)}
                   <span className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-1 h-1 rounded-full bg-white" />
                 </div>

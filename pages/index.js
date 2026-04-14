@@ -1,12 +1,18 @@
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import Header from "../components/Navigation/Header";
 import Dock from "../components/Dock/Dock";
 import Desktop from "../components/Desktop/Desktop";
+
+const ArmorBackground = dynamic(() => import("../components/ArmorBackground"), {
+  ssr: false,
+});
 
 export default function Home() {
   const [openFolder, setOpenFolder] = useState(null); // the active window
   const [minimized, setMinimized] = useState([]); // array of folders
   const [isFull, setIsFull] = useState(false); // full-screen flag
+  const [navModalSlug, setNavModalSlug] = useState(null);
 
   /* ---------- helpers ---------- */
   const open = (folder) => {
@@ -36,7 +42,9 @@ export default function Home() {
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
-      <Header />
+      <ArmorBackground />
+      <div className="fixed inset-0 bg-black/15 pointer-events-none z-[1]" />
+      <Header onMenuItemClick={(slug) => setNavModalSlug(slug)} />
 
       <Desktop
         openFolder={openFolder}
@@ -45,6 +53,8 @@ export default function Home() {
         onMinimizeFolder={minimize}
         onToggleFullscreen={toggleFS}
         isFullscreen={isFull}
+        navModalSlug={navModalSlug}
+        onNavModalHandled={() => setNavModalSlug(null)}
       />
 
       <Dock

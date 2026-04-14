@@ -5,7 +5,7 @@ const GET_DOCK = gql`
     dock {
       dockItem {
         title
-        reactIconName
+        reactIcon
         url
         modalSlug
         reactIconColor
@@ -22,10 +22,14 @@ const GET_HEADER = gql`
       logo {
         url
       }
+      darkLogo {
+        url
+      }
       menus {
         label
         items {
           text
+          url
           modalSlug
         }
       }
@@ -42,26 +46,36 @@ const GET_FOLDER = gql`
     folderCategories(sort: "order:asc") {
       documentId
       name
+      reactIcon
+      reactIconColor
+      icon {
+        url
+      }
       desktop_folders {
         documentId
-        uuid
         title
         modalSlug
+        url
+        richContent
+        backgroundColor
+        textColor
         icon {
           url
         }
 
         items {
           id
-          title: Title
+          title
           reactIcon
           reactIconColor
           modalSlug
+          richContent
+          backgroundColor
+          textColor
           icon {
             url
           }
           url
-          modalSlug
           subItem {
             id
             text
@@ -133,4 +147,88 @@ const GET_BROWSER_MODAL = gql`
     }
   }
 `;
-export { GET_HEADER, GET_DOCK, GET_FOLDER, GET_BROWSER_MODAL };
+const GET_PRODUCTS = gql`
+  query GetProducts {
+    products(sort: "createdAt:desc") {
+      documentId
+      code
+      name
+      price
+      description
+      season
+      category
+      sizes
+      images {
+        url
+      }
+      colors {
+        name
+        hex
+        image {
+          url
+        }
+        images {
+          url
+        }
+      }
+    }
+  }
+`;
+
+const GET_PRODUCT = gql`
+  query GetProduct($documentId: ID!) {
+    product(documentId: $documentId) {
+      documentId
+      code
+      name
+      price
+      description
+      season
+      category
+      sizes
+      images {
+        url
+      }
+      colors {
+        name
+        hex
+        image {
+          url
+        }
+        images {
+          url
+        }
+      }
+    }
+  }
+`;
+
+const GET_SYSTEM_SETTINGS = gql`
+  query GetSystemSettings {
+    systemSettings {
+      profileName
+      profileSubtitle
+      about
+      profileImage {
+        url
+      }
+      sidebarItems {
+        id
+        label
+        reactIcon
+        slug
+      }
+      backgroundOptions {
+        id
+        label
+        themeKey
+        tipColor
+        baseColor
+        strokeColor
+        previewColor
+      }
+    }
+  }
+`;
+
+export { GET_HEADER, GET_DOCK, GET_FOLDER, GET_BROWSER_MODAL, GET_PRODUCTS, GET_PRODUCT, GET_SYSTEM_SETTINGS };

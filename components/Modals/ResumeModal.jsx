@@ -5,7 +5,7 @@ import Draggable from "react-draggable";
 import Image from "next/image";
 import { useQuery } from "@apollo/client";
 import { GET_HEADER } from "@/graphql/queries";
-import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
   const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL ?? "";
@@ -13,9 +13,12 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
 
   /* header logo */
   const { data } = useQuery(GET_HEADER);
-  const logoUrl = data?.header?.logo?.[0]?.url
-    ? toUrl(data.header.logo[0].url)
-    : null;
+  const { isDark } = useTheme();
+  const lightLogoUrl = data?.header?.logo?.[0]?.url
+    ? toUrl(data.header.logo[0].url) : null;
+  const darkLogoUrl = data?.header?.darkLogo?.url
+    ? toUrl(data.header.darkLogo.url) : null;
+  const logoUrl = isDark ? (darkLogoUrl || lightLogoUrl) : lightLogoUrl;
 
   /* résumé images */
   const images =
@@ -28,7 +31,23 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
   /* state */
   const [idx, setIdx] = useState(0);
   const [isFS, setFS] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const dragRef = useRef(null);
+
+  /* fetch PDF as blob to avoid X-Frame-Options cross-origin restriction */
+  useEffect(() => {
+    const url = images[idx];
+    if (!url?.toLowerCase().endsWith(".pdf")) { setPdfBlobUrl(null); return; }
+    let objectUrl;
+    fetch(url)
+      .then((r) => r.blob())
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(objectUrl);
+      })
+      .catch(() => setPdfBlobUrl(null));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [images[idx]]);
 
   /* keyboard arrows */
   useEffect(() => {
@@ -57,31 +76,33 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
       className={
         full
           ? "absolute inset-x-0 top-1 bottom-22 flex flex-col border border-gray-900 bg-gray-300 z-40"
-          : "w-[500px] h-[85vh] md:w-[40vw] rounded-lg shadow-2xl border border-gray-900 bg-gray-300 flex flex-col overflow-hidden"
+          : "w-[500px] h-[85vh] max-w-[calc(100vw-2rem)] max-h-[90vh] md:w-[40vw] rounded-lg shadow-2xl border border-gray-900 bg-gray-300 flex flex-col overflow-hidden"
       }
     >
       {/* title bar */}
       <div
         className={
-          "title-bar flex items-center h-8 px-3 bg-[#363539] border-b border-black" +
+          "title-bar flex items-center h-8 px-3 border-b" +
+          (isDark ? " bg-[#363539] border-black" : " bg-[#e8e8ed] border-gray-300") +
           (full ? "" : " cursor-move")
         }
       >
         <div className="flex items-center space-x-2">
           <button
+            onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onClose(); }}
             onClick={onClose}
-            className="w-3 h-3 rounded-full bg-[#FF5F57]"
+            className="w-3 h-3 rounded-full bg-[#FF5F57] flex-shrink-0"
           />
           <button
             onClick={() => onMinimizeFolder(folder)}
-            className="w-3 h-3 rounded-full bg-[#FFBD2E]"
+            className="w-3 h-3 rounded-full bg-[#FFBD2E] flex-shrink-0"
           />
           <button
             onClick={() => setFS(!isFS)}
-            className="w-3 h-3 rounded-full bg-[#28C93F]"
+            className="w-3 h-3 rounded-full bg-[#28C93F] flex-shrink-0"
           />
         </div>
-        <span className="absolute left-1/2 -translate-x-1/2 font-medium text-white select-none">
+        <span className={`absolute left-1/2 -translate-x-1/2 font-medium select-none text-sm ${isDark ? "text-white" : "text-gray-800"}`}>
           {folder.title.replace(".exe", "")}
         </span>
         {logoUrl && (
@@ -96,14 +117,33 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
           />
         )}
       </div>
-      <div className="flex items-center h-7 px-3 bg-black border-b border-gray-800 text-xs">
+      {/* toolbar: page nav + download */}
+      <div className="flex items-center h-9 px-3 bg-black border-b border-gray-800 text-xs gap-2">
+        {images.length > 1 && (
+          <div className="flex items-center gap-3">
+            <button
+              onTouchEnd={(e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); }}
+              onClick={() => setIdx((i) => (i - 1 + images.length) % images.length)}
+              className="text-white px-2 py-1 text-base"
+            >
+              ‹
+            </button>
+            <span className="text-gray-400">{idx + 1} / {images.length}</span>
+            <button
+              onTouchEnd={(e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); }}
+              onClick={() => setIdx((i) => (i + 1) % images.length)}
+              className="text-white px-2 py-1 text-base"
+            >
+              ›
+            </button>
+          </div>
+        )}
         <span className="ml-auto">
-          {/* download attr lets the browser save without navigating away */}
           {images.length > 0 && (
             <a
               href={images[idx]}
               download
-              className="font-bold text-md text-white  rounded-lg p-1 hover:underline"
+              className="font-bold text-md text-white rounded-lg p-1 hover:underline"
             >
               Download
             </a>
@@ -111,14 +151,25 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
         </span>
       </div>
 
-      {/* résumé image */}
+      {/* résumé image or PDF */}
       <div className="flex-1 overflow-auto relative">
         {!images.length ? (
           <div className="h-full flex items-center justify-center">
             <p className="text-gray-700 italic">No résumé image found.</p>
           </div>
+        ) : images[idx]?.toLowerCase().endsWith(".pdf") ? (
+          pdfBlobUrl ? (
+            <iframe
+              src={pdfBlobUrl}
+              className="w-full h-full border-0"
+              title="Resume PDF"
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center">
+              <p className="text-gray-500 italic text-sm">Loading PDF…</p>
+            </div>
+          )
         ) : (
-          /* ↓ slimmer top/bottom padding */
           <div className="py-0 flex justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -129,28 +180,6 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
           </div>
         )}
 
-        {/* arrows */}
-        {images.length > 1 && (
-          <>
-            <button
-              onClick={() =>
-                setIdx((i) => (i - 1 + images.length) % images.length)
-              }
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-800 hover:text-black"
-            >
-              <FaChevronLeft size={26} />
-            </button>
-            <button
-              onClick={() => setIdx((i) => (i + 1) % images.length)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-800 hover:text-black"
-            >
-              <FaChevronRight size={26} />
-            </button>
-            <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-gray-700">
-              Page {idx + 1} / {images.length}
-            </span>
-          </>
-        )}
       </div>
     </div>
   );
@@ -159,7 +188,7 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
   return (
     <div
       onClick={onClose}
-      className="absolute inset-0 bg-black/50 flex items-center justify-center z-30"
+      className="absolute inset-0 flex items-center justify-center z-30"
     >
       {isFS ? (
         <WindowBody full />
@@ -169,7 +198,7 @@ export default function ResumeModal({ folder, onClose, onMinimizeFolder }) {
           bounds="parent"
           nodeRef={dragRef}
           /* ↑ start 80 px higher than exact centre */
-          defaultPosition={{ x: 0, y: -40 }}
+          defaultPosition={{ x: 0, y: 0 }}
         >
           <div ref={dragRef}>
             <WindowBody full={false} />
